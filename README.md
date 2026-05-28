@@ -1,94 +1,59 @@
-
-
 # 外卖订单管理系统 (Sky Take-Out)
 
-这是一个基于 Spring Boot 构建的外卖订单管理后端服务系统，包含了完整的员工管理、订单处理、菜品管理、购物车、微信支付等功能模块。
-
-## 项目简介
-
-本项目是一个餐饮外卖平台的 RESTful API 后端服务，采用微服务架构设计，支持多端接入（用户端、管理端）。系统集成了 JWT 认证、阿里云OSS文件存储、微信小程序登录、微信支付等第三方服务。
+基于 Spring Boot 构建的餐饮外卖平台后端服务，当前处于开发阶段。
 
 ## 技术栈
 
-- **框架**: Spring Boot 2.x
-- **持久层**: MyBatis + MySQL
-- **认证**: JWT Token
-- **文件存储**: 阿里云 OSS
-- **支付**: 微信支付
-- **API文档**: Swagger (Knife4j)
+| 组件 | 版本 |
+|------|------|
+| Spring Boot | 2.7.3 |
+| MyBatis | 2.2.0 |
+| MySQL | 8.0+ |
+| Druid | 1.2.1 |
+| Knife4j (Swagger) | 3.0.2 |
+| PageHelper | 1.3.0 |
+| JJWT | 0.9.1 |
 
-## 模块说明
+## 项目结构
 
 ```
 sky-take-out
-├── sky-common          # 公共模块
-│   ├── constant      # 常量定义
-│   ├── context       # 上下文
-│   ├── enumeration  # 枚举类型
-│   ├── exception     # 自定义异常
-│   ├── json          # JSON处理
-│   ├── properties   # 配置属性类
-│   ├── result       # 统一响应结果
-│   └── utils        # 工具类
-├── sky-pojo           # 数据对象
-│   ├── dto           # 数据传输对象
-│   ├── entity        # 实体类
-│   └── vo             # 视图对象
-└── sky-server        # 服务模块
-    ├── config        # 配置类
-    ├── controller    # 控制器
-    ├── handler       # 异常处理
-    ├── interceptor  # 拦截器
-    ├── mapper        # 数据访问层
-    └── service       # 业务逻辑
+├── sky-common               # 公共模块：常量、枚举、异常、工具类、统一响应
+├── sky-pojo                 # 数据对象：11 个实体、21 个 DTO、17 个 VO
+└── sky-server               # 服务模块：Spring Boot 应用
+    ├── config               # WebMvc 配置、Knife4j、消息转换器
+    ├── controller           # 控制器（目前仅 employee）
+    ├── handler              # 全局异常处理
+    ├── interceptor          # JWT 拦截器
+    ├── mapper               # MyBatis Mapper（目前仅 employee）
+    └── service              # 业务逻辑
 ```
 
-## 核心功能
+## 当前已实现
 
-### 员工管理
-- 员工登录/退出
-- 新增员工
-- 密码修改
+### 员工管理 (`/admin/employee`)
 
-### 用户管理
-- 微信小程序授权登录
-- 用户信息管理
+| 方法 | 路径 | 说明 |
+|------|------|------|
+| POST | `/admin/employee/login` | 员工登录，返回 JWT Token |
+| POST | `/admin/employee/logout` | 员工登出 |
+| POST | `/admin/employee` | 新增员工 |
+| GET | `/admin/employee/page` | 分页查询员工 |
 
-### 菜品分类管理
-- 分类增删改查
-- 分类启用/禁用
+- JWT 鉴权：`/admin/**` 路径自动拦截（登录接口除外）
+- 全局异常处理：`BaseException` 及唯一约束冲突
+- PageHelper 分页
 
-### 菜品管理
-- 菜品增删改查
--菜品上下架
-- 口味配置
+### 基础设施（已就绪，待接入）
 
-### 套餐管理
-- 套餐增删改查
-- 套餐菜品关联
-- 套餐上下架
-
-### 购物车
-- 添加购物车
-- 查看购物车
-- 清空购物车
-
-### 订单管理
-- 订单提交
-- 订单支付
-- 订单查询
-- 订单取消/拒单
-- 订单配送状态更新
-
-### 地址簿管理
-- 收货地址管理
-- 默认地址设置
-
-### 数据统计
-- 营业额概览
-- 订单完成率
-- 销售排行
-- 用户统计
+| 组件 | 状态 |
+|------|------|
+| 阿里云 OSS 工具类 | 已实现，未接入 Controller |
+| 微信小程序登录属性 | 已配置，未接入 |
+| 微信支付工具类 | 已实现，未接入 |
+| Redis 依赖 | 已引入，未配置 |
+| WebSocket 依赖 | 已引入，未配置 |
+| Apache POI (Excel) | 已引入，未使用 |
 
 ## 快速开始
 
@@ -96,11 +61,11 @@ sky-take-out
 
 - JDK 1.8+
 - Maven 3.0+
-- MySQL 5.7+
+- MySQL 8.0+
 
-### 配置说明
+### 配置
 
-在 `application.yml` 中配置以下内容：
+修改 `sky-server/src/main/resources/application-dev.yml`：
 
 ```yaml
 spring:
@@ -108,25 +73,9 @@ spring:
     url: jdbc:mysql://localhost:3306/sky_take_out
     username: root
     password: your_password
-
-sky:
-  alioss:
-    endpoint: your_endpoint
-    accessKeyId: your_access_key
-    accessKeySecret: your_secret
-    bucketName: your_bucket
-  
-  jwt:
-    adminSecretKey: your_admin_key
-    adminTtl: 3600000
-    adminTokenName: token
-    
-wechat:
-  appid: your_appid
-  secret: your_secret
 ```
 
-### 运行项目
+### 运行
 
 ```bash
 mvn clean install
@@ -134,36 +83,22 @@ cd sky-server
 mvn spring-boot:run
 ```
 
-服务启动后访问 `http://localhost:8080/doc.html` 查看API文档。
+启动后访问 `http://localhost:8080/doc.html` 查看 API 文档。
 
-## 接口示例
+## 数据模型
 
-### 员工登录
+系统设计了以下业务实体（POJO 层已完整，服务层逐步实现中）：
 
-```http
-POST /admin/employee/login
-Content-Type: application/json
-
-{
-    "username": "admin",
-    "password": "123456"
-}
-```
-
-### 获取菜品列表
-
-```http
-GET /admin/dish/page?page=1&pageSize=10
-Authorization: Bearer {{token}}
-```
-
-## 项目结构亮点
-
-- **统一响应**: 所有接口返回统一的 `Result` 对象
-- **自动填充**: 创建时间、更新时间、创建人等字段自动填充
-- **异常处理**: 全局统一异常处理机制
-- **JWT鉴权**: 管理员和用户使用不同的 JWT 密钥
-- **DTO转换**: DO/VO/DTO 分离，职责明确
+| 实体 | 说明 |
+|------|------|
+| Employee | 员工 |
+| User | 微信用户 |
+| Category | 分类（菜品/套餐） |
+| Dish / DishFlavor | 菜品 / 口味 |
+| Setmeal / SetmealDish | 套餐 / 套餐菜品 |
+| ShoppingCart | 购物车 |
+| AddressBook | 地址簿 |
+| Orders / OrderDetail | 订单 / 订单明细 |
 
 ## 许可证
 

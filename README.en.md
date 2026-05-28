@@ -1,104 +1,71 @@
 # Take-Out Order Management System (Sky Take-Out)
 
-This is a backend service system for take-out order management built on Spring Boot, featuring complete modules for employee management, order processing, dish management, shopping cart, WeChat Pay, and more.
+A food delivery platform backend built with Spring Boot. Currently in active development.
 
-## Project Overview
+## Tech Stack
 
-This project is a RESTful API backend service for a food delivery platform, designed with a microservices architecture to support multi-platform access (user side and management side). The system integrates third-party services including JWT authentication, Alibaba Cloud OSS file storage, WeChat Mini Program login, and WeChat Pay.
+| Component | Version |
+|-----------|---------|
+| Spring Boot | 2.7.3 |
+| MyBatis | 2.2.0 |
+| MySQL | 8.0+ |
+| Druid | 1.2.1 |
+| Knife4j (Swagger) | 3.0.2 |
+| PageHelper | 1.3.0 |
+| JJWT | 0.9.1 |
 
-## Technology Stack
-
-- **Framework**: Spring Boot 2.x
-- **Persistence Layer**: MyBatis + MySQL
-- **Authentication**: JWT Token
-- **File Storage**: Alibaba Cloud OSS
-- **Payment**: WeChat Pay
-- **API Documentation**: Swagger (Knife4j)
-
-## Module Structure
+## Project Structure
 
 ```
 sky-take-out
-├── sky-common          # Common Module
-│   ├── constant      # Constant Definitions
-│   ├── context       # Context
-│   ├── enumeration   # Enumerations
-│   ├── exception     # Custom Exceptions
-│   ├── json          # JSON Processing
-│   ├── properties    # Configuration Property Classes
-│   ├── result        # Unified Response Results
-│   └── utils         # Utility Classes
-├── sky-pojo           # Data Objects
-│   ├── dto           # Data Transfer Objects
-│   ├── entity        # Entity Classes
-│   └── vo            # View Objects
-└── sky-server        # Service Module
-    ├── config        # Configuration Classes
-    ├── controller    # Controllers
-    ├── handler       # Exception Handling
-    ├── interceptor   # Interceptors
-    ├── mapper        # Data Access Layer
-    └── service       # Business Logic
+├── sky-common               # Shared module: constants, enums, exceptions, utils, unified response
+├── sky-pojo                 # Data objects: 11 entities, 21 DTOs, 17 VOs
+└── sky-server               # Service module: Spring Boot application
+    ├── config               # WebMvc config, Knife4j, message converters
+    ├── controller           # Controllers (currently employee only)
+    ├── handler              # Global exception handling
+    ├── interceptor          # JWT interceptor
+    ├── mapper               # MyBatis mappers (currently employee only)
+    └── service              # Business logic
 ```
 
-## Core Features
+## Implemented Features
 
-### Employee Management
-- Employee login/logout
-- Add new employees
-- Password modification
+### Employee Management (`/admin/employee`)
 
-### User Management
-- WeChat Mini Program authorization login
-- User information management
+| Method | Path | Description |
+|--------|------|-------------|
+| POST | `/admin/employee/login` | Employee login, returns JWT token |
+| POST | `/admin/employee/logout` | Employee logout |
+| POST | `/admin/employee` | Create new employee |
+| GET | `/admin/employee/page` | Paginated employee query |
 
-### Dish Category Management
-- Create, read, update, delete categories
-- Enable/disable categories
+- JWT authentication on `/admin/**` (login endpoint excluded)
+- Global exception handling for `BaseException` and unique constraint violations
+- PageHelper pagination
 
-### Dish Management
-- Create, read, update, delete dishes
-- Publish/unpublish dishes
-- Flavor configuration
+### Infrastructure (ready, not yet wired)
 
-### Set Meal Management
-- Create, read, update, delete set meals
-- Associate dishes with set meals
-- Publish/unpublish set meals
-
-### Shopping Cart
-- Add items to cart
-- View cart contents
-- Clear cart
-
-### Order Management
-- Submit orders
-- Process payments
-- Query orders
-- Cancel or reject orders
-- Update delivery status
-
-### Address Book Management
-- Manage delivery addresses
-- Set default address
-
-### Data Analytics
-- Sales overview
-- Order completion rate
-- Sales ranking
-- User statistics
+| Component | Status |
+|-----------|--------|
+| Aliyun OSS utility | Implemented, no controller endpoint |
+| WeChat Mini Program login properties | Configured, not integrated |
+| WeChat Pay utility | Implemented, not integrated |
+| Redis dependency | Declared, not configured |
+| WebSocket dependency | Declared, not configured |
+| Apache POI (Excel) | Declared, not used |
 
 ## Quick Start
 
-### Environment Requirements
+### Prerequisites
 
 - JDK 1.8+
 - Maven 3.0+
-- MySQL 5.7+
+- MySQL 8.0+
 
 ### Configuration
 
-Configure the following in `application.yml`:
+Edit `sky-server/src/main/resources/application-dev.yml`:
 
 ```yaml
 spring:
@@ -106,25 +73,9 @@ spring:
     url: jdbc:mysql://localhost:3306/sky_take_out
     username: root
     password: your_password
-
-sky:
-  alioss:
-    endpoint: your_endpoint
-    accessKeyId: your_access_key
-    accessKeySecret: your_secret
-    bucketName: your_bucket
-  
-  jwt:
-    adminSecretKey: your_admin_key
-    adminTtl: 3600000
-    adminTokenName: token
-    
-wechat:
-  appid: your_appid
-  secret: your_secret
 ```
 
-### Run the Project
+### Run
 
 ```bash
 mvn clean install
@@ -132,36 +83,22 @@ cd sky-server
 mvn spring-boot:run
 ```
 
-After the service starts, visit `http://localhost:8080/doc.html` to view the API documentation.
+After startup, visit `http://localhost:8080/doc.html` for API documentation.
 
-## API Examples
+## Data Model
 
-### Employee Login
+The following business entities are defined (POJO layer is complete, service layer being built incrementally):
 
-```http
-POST /admin/employee/login
-Content-Type: application/json
-
-{
-    "username": "admin",
-    "password": "123456"
-}
-```
-
-### Retrieve Dish List
-
-```http
-GET /admin/dish/page?page=1&pageSize=10
-Authorization: Bearer {{token}}
-```
-
-## Project Structure Highlights
-
-- **Unified Response**: All APIs return a standardized `Result` object
-- **Automatic Field Filling**: Automatically populate fields such as creation time, update time, and creator
-- **Global Exception Handling**: Centralized exception handling mechanism
-- **JWT Authentication**: Separate JWT secrets for administrators and users
-- **DTO Separation**: Clear separation of DO/VO/DTO with well-defined responsibilities
+| Entity | Description |
+|--------|-------------|
+| Employee | Employee |
+| User | WeChat user |
+| Category | Category (dish / setmeal) |
+| Dish / DishFlavor | Dish / flavor options |
+| Setmeal / SetmealDish | Setmeal / setmeal-dish association |
+| ShoppingCart | Shopping cart |
+| AddressBook | Delivery address |
+| Orders / OrderDetail | Order / order line items |
 
 ## License
 
