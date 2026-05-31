@@ -9,7 +9,6 @@ import com.sky.service.DishService;
 import com.sky.vo.DishVO;
 import io.swagger.annotations.ApiOperation;
 import lombok.extern.slf4j.Slf4j;
-import org.apache.ibatis.annotations.Delete;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.web.bind.annotation.*;
 
@@ -82,5 +81,15 @@ public class DishController {
         log.info("菜品起售停售：{}", status, id);
         dishService.startOrStop(status, id);
         return Result.success();
+    }
+
+    /*
+    *根据分类id查询菜品 */
+    @GetMapping("/list")
+    @ApiOperation("根据分类id查询菜品")
+    public Result<List<Dish>> list(Long categoryId) {
+        log.info("根据分类id查询菜品：{}", categoryId);
+        List<Dish> list = dishService.list(categoryId);
+        return Result.success(list);
     }
 }
