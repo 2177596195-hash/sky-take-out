@@ -12,7 +12,7 @@
     </insert>
 
     <select id="getSetmealDishIds" resultType="java.lang.Long">
-        SELECT dish_id FROM setmeal_dish WHERE setmeal_id IN
+        SELECT setmeal_id FROM setmeal_dish WHERE dish_id IN
         <foreach collection="dishIds" item="dishId" open="(" close=")">
             #{dishId}
         </foreach>
