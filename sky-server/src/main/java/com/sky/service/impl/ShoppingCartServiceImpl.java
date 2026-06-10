@@ -74,4 +74,17 @@ public class ShoppingCartServiceImpl implements ShoppingCartService {
         //如果购物车数据不存在，查入一条购物车数据
 
     }
+
+    /*
+    * 查询购物车*/
+    @Override
+    public List<ShoppingCart> showShoppingCart() {
+        //设置当前微信用户id
+        Long userId = BaseContext.getCurrentId();
+        ShoppingCart shoppingCart = ShoppingCart.builder()
+                .userId(userId)
+                .build();
+        List<ShoppingCart> list = shoppingCartMapper.list(shoppingCart);
+        return list;
+    }
 }
