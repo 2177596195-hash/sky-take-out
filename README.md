@@ -16,11 +16,11 @@
 | PageHelper | 1.3.0 | MyBatis分页插件，自动拼接LIMIT |
 | JJWT | 0.9.1 | JWT令牌的生成与解析 |
 | 阿里云 OSS | - | 对象存储，用于图片上传 |
-| WeChat Pay | - | 微信支付（已集成工具类） |
+| WeChat Pay | - | 微信支付 |
 | Lombok | - | 简化实体类代码（@Data, @Builder等） |
 | AspectJ | - | AOP切面编程，用于公共字段自动填充 |
-| Apache POI | - | Excel报表导出（已引入依赖） |
-| WebSocket | - | 长连接（已引入依赖） |
+| Apache POI | - | Excel报表导出 |
+| WebSocket | - | 长连接，来单提醒和催单推送 |
 
 ## 项目结构
 
@@ -46,14 +46,17 @@ sky-take-out/
 └── sky-server          # 服务模块（Spring Boot主程序）
     ├── annotation      #   自定义注解（@AutoFill 公共字段自动填充）
     ├── aspect          #   AOP切面（拦截@AutoFill注解，反射调用setter）
-    ├── config          #   配置类（MVC、Redis、OSS、Knife4j）
+    ├── config          #   配置类（MVC、Redis、OSS、Knife4j、WebSocket）
     ├── controller      #   控制器
-    │   ├── admin       #     管理端接口（6个Controller，25个接口）
-    │   └── user        #     用户端接口（7个Controller，15个接口）
+    │   ├── admin       #     管理端接口（9个Controller）
+    │   ├── user        #     用户端接口（8个Controller）
+    │   └── notify      #     支付回调接口
     ├── handler         #   全局异常处理器
     ├── interceptor     #   JWT拦截器（管理端+用户端，两套独立鉴权）
-    ├── mapper          #   MyBatis Mapper接口（9个）+ XML映射文件（9个）
-    └── service         #   业务逻辑层（7个Service接口+实现类）
+    ├── mapper          #   MyBatis Mapper接口 + XML映射文件
+    ├── service         #   业务逻辑层
+    ├── task            #   定时任务（订单超时取消、自动完成）
+    └── websocket       #   WebSocket服务端（来单提醒、催单推送）
 ```
 
 ### 为什么分三个模块？
@@ -108,7 +111,7 @@ sky-server: 依赖前两者，放业务代码（Controller、Service、Mapper）
 
 ## 已实现功能
 
-### 管理端接口（6个Controller，25个接口）
+### 管理端接口（9个Controller）
 
 管理端供店铺管理员在PC端使用，通过 JWT 鉴权保护。
 
@@ -158,6 +161,19 @@ sky-server: 依赖前两者，放业务代码（Controller、Service、Mapper）
 | PUT | `/admin/setmeal` | 修改套餐 |
 | POST | `/admin/setmeal/status/{status}` | 套餐起售/停售（校验：含停售菜品的套餐不可起售） |
 
+#### 订单管理 (`/admin/order`)
+
+| 方法 | 路径 | 说明 |
+|------|------|------|
+| GET | `/admin/order/conditionSearch` | 订单搜索（按订单号、手机号、状态、时间范围） |
+| GET | `/admin/order/statistics` | 各状态订单数量统计 |
+| GET | `/admin/order/details/{id}` | 查询订单详情 |
+| PUT | `/admin/order/confirm` | 接单 |
+| PUT | `/admin/order/rejection` | 拒单（已支付自动退款） |
+| PUT | `/admin/order/cancel` | 取消订单（已支付自动退款） |
+| PUT | `/admin/order/delivery/{id}` | 派送订单 |
+| PUT | `/admin/order/complete/{id}` | 完成订单 |
+
 #### 文件上传 (`/admin/common`)
 
 | 方法 | 路径 | 说明 |
@@ -171,7 +187,26 @@ sky-server: 依赖前两者，放业务代码（Controller、Service、Mapper）
 | PUT | `/admin/shop/{status}` | 设置店铺营业状态（Redis存储） |
 | GET | `/admin/shop/status` | 查询店铺当前营业状态 |
 
-### 用户端接口（7个Controller，15个接口）
+#### 数据统计 (`/admin/report`)
+
+| 方法 | 路径 | 说明 |
+|------|------|------|
+| GET | `/admin/report/turnoverStatistics` | 营业额统计（按日期范围） |
+| GET | `/admin/report/userStatistics` | 用户数量统计 |
+| GET | `/admin/report/ordersStatistics` | 订单数量统计 |
+| GET | `/admin/report/top10` | 销量排行榜Top10 |
+| GET | `/admin/report/export` | 导出Excel报表 |
+
+#### 工作台 (`/admin/workspace`)
+
+| 方法 | 路径 | 说明 |
+|------|------|------|
+| GET | `/admin/workspace/businessData` | 今日营业数据（营业额、订单量、客单价、新用户） |
+| GET | `/admin/workspace/overviewDishes` | 菜品总览（已起售/已停售） |
+| GET | `/admin/workspace/overviewSetmeals` | 套餐总览（已起售/已停售） |
+| GET | `/admin/workspace/overviewOrders` | 订单总览（各状态数量） |
+
+### 用户端接口（8个Controller）
 
 用户端供微信小程序使用，通过 JWT 鉴权保护（与管理端使用不同的密钥和Token名称）。
 
@@ -221,11 +256,29 @@ sky-server: 依赖前两者，放业务代码（Controller、Service、Mapper）
 | PUT | `/user/addressBook/default` | 设置默认地址（事务保证唯一性） |
 | GET | `/user/addressBook/default` | 查询当前用户的默认地址 |
 
+#### 订单 (`/user/order`)
+
+| 方法 | 路径 | 说明 |
+|------|------|------|
+| POST | `/user/order/submit` | 提交订单（校验地址+购物车，事务处理） |
+| PUT | `/user/order/payment` | 订单支付（调用微信支付API） |
+| GET | `/user/order/historyOrders` | 历史订单查询（分页，支持按状态筛选） |
+| GET | `/user/order/orderDetail/{id}` | 查询订单详情 |
+| PUT | `/user/order/cancel/{id}` | 取消订单（已支付自动退款） |
+| POST | `/user/order/repetition/{id}` | 再来一单（历史订单菜品重新加入购物车） |
+| GET | `/user/order/reminder/{id}` | 催单（WebSocket推送催单消息） |
+
 #### 店铺状态 (`/user/shop`)
 
 | 方法 | 路径 | 说明 |
 |------|------|------|
 | GET | `/user/shop/status` | 查询店铺营业状态（用户端只读） |
+
+### 支付回调接口
+
+| 方法 | 路径 | 说明 |
+|------|------|------|
+| POST | `/notify/paySuccess` | 微信支付成功回调（解密数据+更新订单状态+WebSocket来单提醒） |
 
 ## 核心技术实现
 
@@ -234,7 +287,6 @@ sky-server: 依赖前两者，放业务代码（Controller、Service、Mapper）
 管理端和用户端使用**独立的密钥和Token名称**，互不干扰：
 
 ```yaml
-# application.yml
 sky:
   jwt:
     admin-secret-key: itcast        # 管理端密钥
@@ -243,22 +295,14 @@ sky:
     user-token-name: authorization   # 用户端请求头名称
 ```
 
-拦截器注册顺序：先管理端后用户端，分别拦截 `/admin/**` 和 `/user/**`。
-
 ### 2. AOP 公共字段自动填充
 
-每次插入或更新数据时，`createTime`、`updateTime`、`createUser`、`updateUser` 这四个字段需要手动设置，容易遗漏。通过自定义注解 + AOP切面实现自动填充：
+通过自定义注解 + AOP切面，自动填充 `createTime`、`updateTime`、`createUser`、`updateUser`：
 
 ```java
-// Mapper接口方法上标注注解
 @AutoFill(OperationType.INSERT)
 void insert(Dish dish);
-
-@AutoFill(OperationType.UPDATE)
-void update(Dish dish);
 ```
-
-AOP切面拦截这些方法，通过反射自动调用对应的setter方法填充字段，无需在Service层手动编写。
 
 ### 3. Redis 缓存策略
 
@@ -268,59 +312,33 @@ AOP切面拦截这些方法，通过反射自动调用对应的setter方法填�
 | 菜品列表 | `dish_{categoryId}` | 管理端增删改时清除对应分类缓存 |
 | 套餐列表 | Spring Cache自动管理 | 管理端增删改时清除全部套餐缓存 |
 
-### 4. 动态SQL（MyBatis）
-
-大量使用MyBatis动态SQL来实现灵活的条件查询：
-
-- `<where>` + `<if>`：根据参数是否为null动态拼接WHERE条件
-- `<set>` + `<if>`：UPDATE时只更新非null字段（局部更新）
-- `<foreach>`：批量删除、批量插入（如菜品口味、套餐菜品）
-- `useGeneratedKeys="true"`：插入后自动回填自增ID
-
-### 5. 统一响应格式
-
-所有接口返回统一的JSON格式：
-
-```json
-{
-    "code": 1,
-    "msg": "success",
-    "data": { ... }
-}
-```
-
-分页查询额外返回：
-
-```json
-{
-    "code": 1,
-    "data": {
-        "total": 100,
-        "records": [ ... ]
-    }
-}
-```
-
-### 6. 微信小程序登录流程
+### 4. 微信支付流程
 
 ```
-小程序端                         后端                           微信服务器
-   │                              │                              │
-   │  1. uni.login() 获取code     │                              │
-   │ ────────────────────────────→│                              │
-   │                              │  2. code + appid + secret    │
-   │                              │ ────────────────────────────→│
-   │                              │  3. 返回 openid              │
-   │                              │ ←────────────────────────────│
-   │                              │                              │
-   │                              │  4. 查询openid是否已注册      │
-   │                              │     是→查询用户信息            │
-   │                              │     否→自动注册新用户          │
-   │                              │                              │
-   │                              │  5. 生成JWT Token             │
-   │  6. 返回token + 用户信息      │                              │
-   │ ←────────────────────────────│                              │
+小程序 → 后端（生成预支付单）→ 返回支付参数 → 小程序拉起微信支付
+→ 用户支付 → 微信回调后端 → AES解密 → 更新订单状态 → WebSocket来单提醒
 ```
+
+### 5. WebSocket 实时推送
+
+- **来单提醒**：用户支付成功后，服务端通过 WebSocket 向管理端推送新订单通知
+- **催单功能**：用户催单时，服务端向管理端推送催单消息
+- 使用 `@ServerEndpoint` 注解，维护 Session Map 实现群发
+
+### 6. 定时任务
+
+| 任务 | 执行频率 | 说明 |
+|------|----------|------|
+| 订单超时取消 | 每分钟 | 超过15分钟未支付的订单自动取消 |
+| 订单自动完成 | 每天凌晨1点 | 派送中超过一定时间的订单自动完成 |
+
+### 7. 数据统计报表
+
+- 营业额统计（按日期范围查询）
+- 用户数量统计（新增/总量）
+- 订单数量统计（各状态数量）
+- 销量排行榜 Top10
+- Excel 报表导出（Apache POI）
 
 ## 快速开始
 
@@ -372,85 +390,56 @@ sky:
 ### 4. 编译运行
 
 ```bash
-# 在项目根目录执行
 mvn clean install
-
-# 启动服务
 cd sky-server
 mvn spring-boot:run
 ```
 
 ### 5. 访问接口文档
 
-启动成功后，浏览器访问：
-
-```
-http://localhost:8080/doc.html
-```
-
-Knife4j 提供了两个分组：
-- **管理端接口**：包含所有 `/admin/**` 接口
-- **用户端接口**：包含所有 `/user/**` 接口
-
-可以在页面上直接调试接口，非常方便。
+启动成功后，浏览器访问：`http://localhost:8080/doc.html`
 
 ### 6. 微信小程序联调
 
-小程序源码在项目的 `day06/微信小程序代码/mp-weixin/mp-weixin/` 目录下。用微信开发者工具打开后，需要：
+小程序源码在 `day06/微信小程序代码/mp-weixin/mp-weixin/` 目录下。用微信开发者工具打开后：
 
 1. 确保后端服务已启动（localhost:8080）
-2. 在开发者工具中勾选「不校验合法域名」（因为后端是HTTP）
-3. 确保 Redis 中 `SHOP_STATUS` 值为 `1`（店铺营业），否则小程序显示"休息中"
-
-## 配置说明
-
-### 环境隔离
-
-项目使用 Spring Profile 实现配置隔离：
-
-```
-application.yml          # 公共配置（端口、MyBatis、JWT等）
-application-dev.yml      # 开发环境配置（数据库、Redis、OSS等）
-```
-
-通过 `spring.profiles.active: dev` 激活开发环境配置。部署生产环境时，创建 `application-prod.yml` 并修改为生产环境的配置即可。
-
-### 密钥安全提醒
-
-`application-dev.yml` 中包含了数据库密码、OSS密钥、微信密钥等敏感信息。正式项目中应该：
-- 不要把密钥文件提交到 Git 仓库
-- 使用环境变量或配置中心管理密钥
-- 本项目是学习项目，为了方便学习直接写在配置文件中
+2. 勾选「不校验合法域名」（因为后端是HTTP）
+3. 确保 Redis 中 `SHOP_STATUS` 值为 `1`（店铺营业）
 
 ## 项目特点
 
 1. **标准分层架构**：Controller → Service → Mapper，职责清晰
-2. **统一规范**：统一响应格式、统一异常处理、统一参数校验
-3. **注解驱动**：`@AutoFill` 自动填充、`@Transactional` 事务管理、`@Cacheable` 缓存
+2. **统一规范**：统一响应格式、统一异常处理
+3. **注解驱动**：`@AutoFill` 自动填充、`@Transactional` 事务管理、`@Cacheable` 缓存、`@Scheduled` 定时任务
 4. **前后端分离**：后端只提供RESTful API，前端通过HTTP请求调用
 5. **双端鉴权**：管理端和用户端独立的JWT认证，安全隔离
 6. **Redis缓存**：热门数据缓存，减少数据库查询压力
-7. **动态SQL**：MyBatis动态SQL实现灵活的条件查询和局部更新
+7. **WebSocket**：实时推送来单提醒和催单消息
 8. **AOP编程**：切面自动处理公共字段填充，减少重复代码
 
 ## 开发进度
 
 | 模块 | 状态 | 说明 |
 |------|------|------|
-| 员工管理 | 已完成 | 登录登出、CRUD、启禁用 |
-| 分类管理 | 已完成 | CRUD、启停用、按类型查询 |
-| 菜品管理 | 已完成 | CRUD、批量删除、起售停售、口味管理 |
-| 套餐管理 | 已完成 | CRUD、批量删除、起售停售、关联菜品 |
-| 文件上传 | 已完成 | 阿里云OSS图片上传 |
-| 店铺管理 | 已完成 | Redis存储营业状态 |
-| 微信登录 | 已完成 | code2session + 自动注册 + JWT |
-| 菜品浏览 | 已完成 | 用户端分类菜品查询 + Redis缓存 |
-| 套餐浏览 | 已完成 | 用户端分类套餐查询 + Spring Cache |
-| 购物车 | 已完成 | 添加、查看、减少、清空 |
-| 地址簿 | 已完成 | CRUD、设置默认地址 |
-| 订单管理 | 待开发 | 提交订单、支付、订单状态流转 |
-| 数据统计 | 待开发 | 营业额、订单量、销量排行等报表 |
-| 来单提醒 | 待开发 | WebSocket实时推送新订单 |
+| 员工管理 | ✅ 已完成 | 登录登出、CRUD、启禁用 |
+| 分类管理 | ✅ 已完成 | CRUD、启停用、按类型查询 |
+| 菜品管理 | ✅ 已完成 | CRUD、批量删除、起售停售、口味管理 |
+| 套餐管理 | ✅ 已完成 | CRUD、批量删除、起售停售、关联菜品 |
+| 文件上传 | ✅ 已完成 | 阿里云OSS图片上传 |
+| 店铺管理 | ✅ 已完成 | Redis存储营业状态 |
+| 微信登录 | ✅ 已完成 | code2session + 自动注册 + JWT |
+| 菜品浏览 | ✅ 已完成 | 用户端分类菜品查询 + Redis缓存 |
+| 套餐浏览 | ✅ 已完成 | 用户端分类套餐查询 + Spring Cache |
+| 购物车 | ✅ 已完成 | 添加、查看、减少、清空 |
+| 地址簿 | ✅ 已完成 | CRUD、设置默认地址 |
+| 订单管理 | ✅ 已完成 | 提交订单、支付、查询、取消、再来一单 |
+| 微信支付 | ✅ 已完成 | 预支付、回调、退款 |
+| 订单管理(管理端) | ✅ 已完成 | 搜索、统计、接单、拒单、派送、完成 |
+| 定时任务 | ✅ 已完成 | 超时自动取消、自动完成 |
+| WebSocket | ✅ 已完成 | 来单提醒、催单推送 |
+| 数据统计 | ✅ 已完成 | 营业额、用户、订单、销量排行、Excel导出 |
+| 工作台 | ✅ 已完成 | 今日营业数据、菜品/套餐/订单总览 |
 
 ## 许可证
 

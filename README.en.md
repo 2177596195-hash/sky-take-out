@@ -16,11 +16,11 @@ A complete food delivery platform backend built with Spring Boot, providing two 
 | PageHelper | 1.3.0 | MyBatis pagination plugin |
 | JJWT | 0.9.1 | JWT token generation and parsing |
 | Aliyun OSS | - | Object storage for image uploads |
-| WeChat Pay | - | WeChat payment integration (utility class ready) |
+| WeChat Pay | - | WeChat payment integration |
 | Lombok | - | Boilerplate code reduction (@Data, @Builder, etc.) |
 | AspectJ | - | AOP for auto-filling audit fields |
-| Apache POI | - | Excel report export (dependency declared) |
-| WebSocket | - | Real-time communication (dependency declared) |
+| Apache POI | - | Excel report export |
+| WebSocket | - | Real-time push notifications (new orders, reminders) |
 
 ## Project Structure
 
@@ -46,14 +46,17 @@ sky-take-out/
 └── sky-server          # Service module (Spring Boot application)
     ├── annotation      #   Custom annotations (@AutoFill for audit field auto-fill)
     ├── aspect          #   AOP aspects (intercepts @AutoFill, uses reflection)
-    ├── config          #   Configuration (MVC, Redis, OSS, Knife4j)
+    ├── config          #   Configuration (MVC, Redis, OSS, Knife4j, WebSocket)
     ├── controller      #   Controllers
-    │   ├── admin       #     Admin-side (6 controllers, 25 endpoints)
-    │   └── user        #     User-side (7 controllers, 15 endpoints)
+    │   ├── admin       #     Admin-side (9 controllers)
+    │   ├── user        #     User-side (8 controllers)
+    │   └── notify      #     Payment callback
     ├── handler         #   Global exception handler
     ├── interceptor     #   JWT interceptors (separate for admin and user)
-    ├── mapper          #   MyBatis Mapper interfaces (9) + XML mappings (9)
-    └── service         #   Business logic layer (7 service interfaces + implementations)
+    ├── mapper          #   MyBatis Mapper interfaces + XML mappings
+    ├── service         #   Business logic layer
+    ├── task            #   Scheduled tasks (order timeout, auto-complete)
+    └── websocket       #   WebSocket server (order notifications)
 ```
 
 ### Why Three Modules?
@@ -108,7 +111,7 @@ Category                            │
 
 ## Implemented Features
 
-### Admin-Side APIs (6 Controllers, 25 Endpoints)
+### Admin-Side APIs (9 Controllers)
 
 For shop administrators on PC, protected by JWT authentication.
 
@@ -158,6 +161,19 @@ For shop administrators on PC, protected by JWT authentication.
 | PUT | `/admin/setmeal` | Update setmeal |
 | POST | `/admin/setmeal/status/{status}` | Start/stop selling (validates: all dishes must be enabled) |
 
+#### Order Management (`/admin/order`)
+
+| Method | Path | Description |
+|--------|------|-------------|
+| GET | `/admin/order/conditionSearch` | Search orders (by number, phone, status, date range) |
+| GET | `/admin/order/statistics` | Order count by status |
+| GET | `/admin/order/details/{id}` | Get order details |
+| PUT | `/admin/order/confirm` | Accept order |
+| PUT | `/admin/order/rejection` | Reject order (auto-refund if paid) |
+| PUT | `/admin/order/cancel` | Cancel order (auto-refund if paid) |
+| PUT | `/admin/order/delivery/{id}` | Mark order as out for delivery |
+| PUT | `/admin/order/complete/{id}` | Mark order as completed |
+
 #### File Upload (`/admin/common`)
 
 | Method | Path | Description |
@@ -171,7 +187,26 @@ For shop administrators on PC, protected by JWT authentication.
 | PUT | `/admin/shop/{status}` | Set shop status (stored in Redis) |
 | GET | `/admin/shop/status` | Get current shop status |
 
-### User-Side APIs (7 Controllers, 15 Endpoints)
+#### Data Reports (`/admin/report`)
+
+| Method | Path | Description |
+|--------|------|-------------|
+| GET | `/admin/report/turnoverStatistics` | Turnover statistics (by date range) |
+| GET | `/admin/report/userStatistics` | User count statistics |
+| GET | `/admin/report/ordersStatistics` | Order count statistics |
+| GET | `/admin/report/top10` | Top 10 best-selling items |
+| GET | `/admin/report/export` | Export Excel report |
+
+#### Work Space (`/admin/workspace`)
+
+| Method | Path | Description |
+|--------|------|-------------|
+| GET | `/admin/workspace/businessData` | Today's business data (turnover, orders, avg price, new users) |
+| GET | `/admin/workspace/overviewDishes` | Dish overview (on sale / discontinued) |
+| GET | `/admin/workspace/overviewSetmeals` | Setmeal overview (on sale / discontinued) |
+| GET | `/admin/workspace/overviewOrders` | Order overview (count by status) |
+
+### User-Side APIs (8 Controllers)
 
 For WeChat Mini Program users, protected by JWT with separate secret keys.
 
@@ -221,11 +256,29 @@ For WeChat Mini Program users, protected by JWT with separate secret keys.
 | PUT | `/user/addressBook/default` | Set default address (transactional, ensures uniqueness) |
 | GET | `/user/addressBook/default` | Get default address |
 
+#### Orders (`/user/order`)
+
+| Method | Path | Description |
+|--------|------|-------------|
+| POST | `/user/order/submit` | Submit order (validates address + cart, transactional) |
+| PUT | `/user/order/payment` | Pay for order (calls WeChat Pay API) |
+| GET | `/user/order/historyOrders` | History orders (paginated, filterable by status) |
+| GET | `/user/order/orderDetail/{id}` | Get order details |
+| PUT | `/user/order/cancel/{id}` | Cancel order (auto-refund if paid) |
+| POST | `/user/order/repetition/{id}` | Reorder (add historical order items to cart) |
+| GET | `/user/order/reminder/{id}` | Send reminder (WebSocket push to admin) |
+
 #### Shop Status (`/user/shop`)
 
 | Method | Path | Description |
 |--------|------|-------------|
 | GET | `/user/shop/status` | Get shop status (read-only for users) |
+
+### Payment Callback
+
+| Method | Path | Description |
+|--------|------|-------------|
+| POST | `/notify/paySuccess` | WeChat payment callback (decrypt data + update order + WebSocket notification) |
 
 ## Core Technical Implementations
 
@@ -242,21 +295,9 @@ sky:
     user-token-name: authorization   # User header name
 ```
 
-Interceptors are registered for `/admin/**` and `/user/**` respectively.
-
 ### 2. AOP Auto-Fill for Audit Fields
 
-Four fields (`createTime`, `updateTime`, `createUser`, `updateUser`) are automatically populated via a custom annotation + AOP aspect:
-
-```java
-@AutoFill(OperationType.INSERT)
-void insert(Dish dish);
-
-@AutoFill(OperationType.UPDATE)
-void update(Dish dish);
-```
-
-The aspect intercepts these methods and uses reflection to call the appropriate setters, eliminating manual field-setting in the service layer.
+Four fields (`createTime`, `updateTime`, `createUser`, `updateUser`) are automatically populated via a custom annotation + AOP aspect.
 
 ### 3. Redis Caching Strategy
 
@@ -266,59 +307,33 @@ The aspect intercepts these methods and uses reflection to call the appropriate 
 | Dish list | `dish_{categoryId}` | Evict category cache on admin changes |
 | Setmeal list | Spring Cache auto-managed | Evict all setmeal cache on admin changes |
 
-### 4. Dynamic SQL (MyBatis)
-
-Extensively uses MyBatis dynamic SQL for flexible queries:
-
-- `<where>` + `<if>`: Dynamic WHERE clause based on non-null parameters
-- `<set>` + `<if>`: Partial UPDATE (only updates non-null fields)
-- `<foreach>`: Batch delete and batch insert (flavors, setmeal dishes)
-- `useGeneratedKeys="true"`: Auto-backfill generated IDs after insert
-
-### 5. Unified Response Format
-
-All endpoints return a consistent JSON structure:
-
-```json
-{
-    "code": 1,
-    "msg": "success",
-    "data": { ... }
-}
-```
-
-Paginated queries include additional fields:
-
-```json
-{
-    "code": 1,
-    "data": {
-        "total": 100,
-        "records": [ ... ]
-    }
-}
-```
-
-### 6. WeChat Mini Program Login Flow
+### 4. WeChat Payment Flow
 
 ```
-Mini Program                    Backend                       WeChat Server
-   │                              │                              │
-   │  1. uni.login() get code     │                              │
-   │ ────────────────────────────→│                              │
-   │                              │  2. code + appid + secret    │
-   │                              │ ────────────────────────────→│
-   │                              │  3. Return openid            │
-   │                              │ ←────────────────────────────│
-   │                              │                              │
-   │                              │  4. Check if openid exists   │
-   │                              │     yes → query user          │
-   │                              │     no  → auto-register       │
-   │                              │                              │
-   │                              │  5. Generate JWT token        │
-   │  6. Return token + user info │                              │
-   │ ←────────────────────────────│                              │
+Mini Program → Backend (create prepay) → Return payment params → Mini Program opens WeChat Pay
+→ User pays → WeChat callback → AES decrypt → Update order status → WebSocket notification
 ```
+
+### 5. WebSocket Real-Time Push
+
+- **New order alert**: After payment, server pushes notification to admin via WebSocket
+- **Order reminder**: User sends reminder, server pushes to admin
+- Uses `@ServerEndpoint` annotation with Session Map for broadcasting
+
+### 6. Scheduled Tasks
+
+| Task | Schedule | Description |
+|------|----------|-------------|
+| Order timeout cancel | Every minute | Auto-cancel orders unpaid for 15+ minutes |
+| Order auto-complete | Daily at 1:00 AM | Auto-complete delivery orders after timeout |
+
+### 7. Data Reports
+
+- Turnover statistics (by date range)
+- User count statistics (new / total)
+- Order count statistics (by status)
+- Sales ranking Top 10
+- Excel report export (Apache POI)
 
 ## Quick Start
 
@@ -377,17 +392,7 @@ mvn spring-boot:run
 
 ### 5. Access API Documentation
 
-After startup, open in browser:
-
-```
-http://localhost:8080/doc.html
-```
-
-Knife4j provides two groups:
-- **Admin APIs**: All `/admin/**` endpoints
-- **User APIs**: All `/user/**` endpoints
-
-You can test APIs directly from the documentation page.
+After startup, open in browser: `http://localhost:8080/doc.html`
 
 ### 6. WeChat Mini Program Integration
 
@@ -395,17 +400,17 @@ The mini program source code is in `day06/微信小程序代码/mp-weixin/mp-wei
 
 1. Ensure the backend is running (localhost:8080)
 2. Check "Do not verify valid domain names" in developer tools (backend uses HTTP)
-3. Ensure `SHOP_STATUS` in Redis is set to `1` (shop open), otherwise the mini program shows "Closed"
+3. Ensure `SHOP_STATUS` in Redis is set to `1` (shop open)
 
 ## Project Highlights
 
 1. **Standard Layered Architecture**: Controller → Service → Mapper with clear responsibilities
 2. **Consistent Conventions**: Unified response format, exception handling, and parameter validation
-3. **Annotation-Driven**: `@AutoFill` for audit fields, `@Transactional` for transactions, `@Cacheable` for caching
-4. **Frontend-Backend Separation**: Backend provides RESTful APIs only, frontend calls via HTTP
+3. **Annotation-Driven**: `@AutoFill`, `@Transactional`, `@Cacheable`, `@Scheduled`
+4. **Frontend-Backend Separation**: Backend provides RESTful APIs only
 5. **Dual JWT Authentication**: Admin and user sides use independent JWT credentials
 6. **Redis Caching**: Hot data cached to reduce database load
-7. **Dynamic SQL**: MyBatis dynamic SQL for flexible queries and partial updates
+7. **WebSocket**: Real-time push for new orders and reminders
 8. **AOP Programming**: Aspect-based auto-fill eliminates repetitive code
 
 ## Development Progress
@@ -423,9 +428,13 @@ The mini program source code is in `day06/微信小程序代码/mp-weixin/mp-wei
 | Setmeal Browsing | Done | User-side category setmeal query + Spring Cache |
 | Shopping Cart | Done | Add, view, decrease, clear |
 | Address Book | Done | CRUD, set default address |
-| Order Management | TODO | Submit order, payment, order status workflow |
-| Data Statistics | TODO | Turnover, order count, sales ranking reports |
-| New Order Alert | TODO | WebSocket real-time push for new orders |
+| Order Management | Done | Submit, pay, query, cancel, reorder |
+| WeChat Payment | Done | Prepay, callback, refund |
+| Order Management (Admin) | Done | Search, statistics, accept, reject, deliver, complete |
+| Scheduled Tasks | Done | Timeout auto-cancel, auto-complete |
+| WebSocket | Done | New order alert, order reminder push |
+| Data Reports | Done | Turnover, users, orders, sales ranking, Excel export |
+| Work Space | Done | Today's data, dish/setmeal/order overview |
 
 ## License
 
