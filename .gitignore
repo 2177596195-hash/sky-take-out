@@ -4,3 +4,7 @@
 *.class
 *Test.java
 **/test/
+
+# 含密钥的本地配置，只保留在本地，不上传
+sky-server/src/main/resources/application.yml
+sky-server/src/main/resources/application-dev.yml
